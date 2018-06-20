@@ -244,6 +244,8 @@ myVersion = node['hopsworks']['version']
 flyway_version = myVersion.sub("-SNAPSHOT", "")
 versions.push(flyway_version)
 
+#condaRepo = 'defaults'
+
 for version in versions do
 
   template "#{theDomain}/flyway/sql/V#{version}__hopsworks.sql" do
@@ -331,7 +333,7 @@ for version in versions do
                 :hive_warehouse => "#{node['hive2']['hopsfs_dir']}/warehouse",
                 :hive_scratchdir => node['hive2']['scratch_dir']
            })
-    action :create
+    action :create_if_missing
   end
 
   #
@@ -345,7 +347,7 @@ for version in versions do
     source "sql/undo/#{version}__undo.sql.erb"
     owner node['glassfish']['user']
     mode 0750
-    action :create
+    action :create_if_missing
   end
 
 end
@@ -1010,6 +1012,24 @@ case node['platform']
 end
 
 
+pythondir=""
+case node['platform']
+ when 'debian', 'ubuntu'
+  pythondir="/usr/local/lib/python2.7/dist-packages"
+ when 'redhat', 'centos', 'fedora'
+  pythondir="/usr/lib/python2.7/site-packages"
+end
+
+
+
+remote_file "#{Chef::Config['file_cache_path']}/sparkmagic-#{node['jupyter']['sparkmagic']['version']}.tar.gz" do
+  user node['jupyter']['user']
+  group node['glassfish']['group']
+  source node['jupyter']['sparkmagic']['url']
+  mode 0755
+  action :create_if_missing
+end
+
 #
 # https://github.com/jupyter-incubator/sparkmagic
 #
@@ -1018,10 +1038,19 @@ bash "jupyter-sparkmagic" do
     retries 1
     code <<-EOF
     set -e
-    pip install --upgrade urllib3
-    pip install --upgrade requests
-    pip install --upgrade jupyter
-    pip install --upgrade sparkmagic
+    pip install --no-cache-dir --upgrade urllib3
+    pip install --no-cache-dir --upgrade requests
+    pip install --no-cache-dir --upgrade jupyter
+
+    cd #{Chef::Config['file_cache_path']}
+    rm -rf sparkmagic
+    tar zxf sparkmagic-#{node['jupyter']['sparkmagic']['version']}.tar.gz
+    cd sparkmagic
+    pip install --no-cache-dir ./hdijupyterutils 
+    pip install --no-cache-dir --upgrade ./autovizwidget
+    pip install --no-cache-dir ./sparkmagic
+    cd #{Chef::Config['file_cache_path']}
+    rm -rf sparkmagic
 EOF
 end
 
@@ -1033,9 +1062,8 @@ bash "pydoop" do
                  'HADOOP_HOME' => node['hops']['base_dir']})
     code <<-EOF
       set -e
-      pip install --no-cache-dir hdfscontents
+      pip install --no-cache-dir --upgrade hdfscontents
     EOF
-    not_if "python -c 'import pydoop'"
 end
 
 
@@ -1080,14 +1108,6 @@ if node['hopsworks']['pixiedust']['enabled'].to_str.eql?("true")
 
 end
 
-pythondir=""
-case node['platform']
- when 'debian', 'ubuntu'
-  pythondir="/usr/local/lib/python2.7/dist-packages"
- when 'redhat', 'centos', 'fedora'
-  pythondir="/usr/lib/python2.7/site-packages"
-end
-
 bash "jupyter-kernels" do
   user "root"
   code <<-EOF
@@ -1109,7 +1129,7 @@ end
 case node['platform']
 when 'debian', 'ubuntu'
 
-  bash "jupyter-sparkmagic-kernel" do
+  bash "jupyter-sparkmagic-kernel-extension" do
     user "root"
     code <<-EOF
     set -e
@@ -1275,8 +1295,16 @@ bash "jupyter-root-sparkmagic" do
     pip install --target #{pythonDir} --upgrade mock
     pip uninstall configparser  -y
     pip install --target #{pythonDir} --upgrade configparser
-    pip uninstall sparkmagic  -y
-    pip install --target #{pythonDir} --upgrade sparkmagic
+    # pip uninstall sparkmagic  -y
+    # cd #{Chef::Config['file_cache_path']}
+    # rm -rf sparkmagic
+    # tar zxf sparkmagic-#{node['jupyter']['sparkmagic']['version']}.tar.gz
+    # cd sparkmagic
+    # pip install ./hdijupyterutils 
+    # pip install --upgrade ./autovizwidget
+    # pip install ./sparkmagic
+    # cd #{Chef::Config['file_cache_path']}
+    # rm -rf sparkmagic
    EOF
 end
 
